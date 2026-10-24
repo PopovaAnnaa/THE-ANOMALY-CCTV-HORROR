@@ -1,23 +1,44 @@
-import pygame
-
-# Налаштування екрана
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
+SCREEN_WIDTH = 960
+SCREEN_HEIGHT = 720
+LOW_WIDTH = 320
+LOW_HEIGHT = 240
+SCALE = SCREEN_WIDTH // LOW_WIDTH
 FPS = 60
 
-# Кольори (RGB)
-COLOR_BLACK = (5, 10, 5)
-COLOR_GREEN = (0, 255, 60)
-COLOR_RED = (255, 50, 50)
-COLOR_GRAY = (50, 60, 50)
-COLOR_LIGHT_GRAY = (120, 130, 120)
-COLOR_WHITE = (240, 240, 240)
+COLOR_BLACK = (4, 6, 5)
+COLOR_GREEN = (110, 255, 150)
+COLOR_DIM_GREEN = (50, 130, 80)
+COLOR_RED = (255, 60, 50)
+COLOR_AMBER = (255, 180, 70)
+COLOR_GRAY = (70, 82, 75)
+COLOR_LIGHT_GRAY = (150, 162, 155)
+COLOR_WHITE = (225, 232, 225)
 
-# Механіка гри для 5 хвилин геймплею
-MAX_ACTIVE_ANOMALIES = 3     # Ліміт аномалій
-REQUIRED_WIN_CATCHES = 10    # Кількість зафіксованих аномалій для перемоги
-INITIAL_SANITY = 100         # Початковий глузд
-SANITY_PENALTY = 15          # Штраф за помилковий клік
-SPAWN_INTERVAL_MS = 10000     # Інтервал появи аномалій (6 сек)
-LOCKOUT_DURATION_MS = 3000   # Час блокування камери при помилці (3 сек)
-EVADE_CHANCE = 0.30          # 30% шанс втечі аномалії при наведенні
+HUD_TOP = 48
+HUD_BOTTOM = 60
+
+MAX_ACTIVE_ANOMALIES = 3
+BREACH_GRACE_MS = 35000
+INITIAL_SANITY = 100
+SANITY_PENALTY = 15
+FIRST_SPAWN_DELAY_MS = 12000
+LOCKOUT_DURATION_MS = 3000
+CAM_SWITCH_STATIC_MS = 220
+EVADE_CHANCE = 0.30
+
+SHIFT_DATE = "24.10.2026"
+SHIFT_START = "03:14"
+SHIFT_END = "06:00"
+SHIFT_DURATION_S = 300
+
+ACTS = [
+    {"name": "PROTOCOL",  "start": "03:14", "spawn": (25, 32), "tier": 1, "ambient": 1.0,  "hum": 0.10},
+    {"name": "PERSONNEL", "start": "04:00", "spawn": (15, 20), "tier": 2, "ambient": 0.92, "hum": 0.16},
+    {"name": "OBSERVER",  "start": "05:00", "spawn": (10, 14), "tier": 3, "ambient": 0.8,  "hum": 0.26},
+]
+
+VOLUME_SWITCH = 0.12
+VOLUME_STATIC = 0.3
+
+GRAIN_ALPHA = 26
+FEED_TINT = (170, 215, 182)

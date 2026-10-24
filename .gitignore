@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Архів знайдених аномалій між змінами (локальний прогрес гравця)
+archive.json

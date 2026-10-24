@@ -1,133 +1,226 @@
-import pygame
+import json
+import os
 import random
+import pygame
 from settings import *
 
+ARCHIVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "archive.json")
+
+
+def _minutes(hhmm):
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+SHIFT_GAME_MINUTES = _minutes(SHIFT_END) - _minutes(SHIFT_START)
+
+
+def clock_to_real(hhmm):
+    return (_minutes(hhmm) - _minutes(SHIFT_START)) * SHIFT_DURATION_S / SHIFT_GAME_MINUTES
+
+
+def fmt_clock(real_s):
+    total = _minutes(SHIFT_START) + min(real_s, SHIFT_DURATION_S) * SHIFT_GAME_MINUTES / SHIFT_DURATION_S
+    total = int(total)
+    return f"{total // 60 % 24:02d}:{total % 60:02d}"
+
+
+ACT_STARTS = [clock_to_real(a["start"]) for a in ACTS]
+
+
+def act_at(real_s):
+    act = 0
+    for i, start in enumerate(ACT_STARTS):
+        if real_s >= start:
+            act = i
+    return act
+
+
+def load_archive():
+    try:
+        with open(ARCHIVE_PATH) as f:
+            return set(json.load(f))
+    except (OSError, ValueError):
+        return set()
+
+
+def save_archive(found):
+    archive = load_archive() | set(found)
+    try:
+        with open(ARCHIVE_PATH, "w") as f:
+            json.dump(sorted(archive), f)
+    except OSError:
+        pass
+    return archive
+
+
+def rating(stats, survived):
+    if not survived:
+        return "F", "SIGNAL LOST"
+    accuracy = stats["logged"] / max(1, stats["spawned"])
+    score = accuracy * 100 - stats["false_alarms"] * 6 - stats["missed"] * 10
+    for threshold, grade, label in ((90, "S", "UNBLINKING"), (75, "A", "VIGILANT"),
+                                    (55, "B", "ATTENTIVE"), (35, "C", "DISTRACTED")):
+        if score >= threshold:
+            return grade, label
+    return "D", "COMPROMISED"
+
+
 class AnomalyManager:
-    def __init__(self):
-        self.state = "MENU"
-        self.current_cam = 1
-        self.max_cams = 8
-        self.caught_count = 0
+    def __init__(self, rooms):
+        self.rooms = rooms
+        self.anomalies = []
+        for cam, room in rooms.items():
+            for a in room.anomalies:
+                self.anomalies.append({**a, "cam": cam, "uid": f"{cam}:{a['key']}", "rect": pygame.Rect(a["hitbox"]),
+                                       "active": False, "hover": False, "evaded": False, "since": 0})
+        self.total = len(self.anomalies)
+        self.reset(0)
+
+    def reset(self, now):
+        self.start = now
         self.sanity = INITIAL_SANITY
-
-        # Блокування при помилці
-        self.is_locked = False
-        self.lock_start_time = 0
-
-        # Сховані тонкі аномалії (дрібні розміри, приховані місця)
-        self.anomalies = [
-            # CAM 01: Mainframe
-            {"id": 1, "cam": 1, "rect": pygame.Rect(148, 178, 16, 24), "active": False, "name": "Led Displace", "evaded": False},
-            {"id": 2, "cam": 1, "rect": pygame.Rect(432, 262, 14, 18), "active": False, "name": "Glitch Pixel", "evaded": False},
-            
-            # CAM 02: Bio-Lab
-            {"id": 3, "cam": 2, "rect": pygame.Rect(485, 330, 22, 18), "active": False, "name": "Tube Crack", "evaded": False},
-            {"id": 4, "cam": 2, "rect": pygame.Rect(235, 280, 12, 12), "active": False, "name": "Lens Distortion", "evaded": False},
-
-            # CAM 03: Decon Vault
-            {"id": 5, "cam": 3, "rect": pygame.Rect(385, 165, 20, 14), "active": False, "name": "Nozzle Shift", "evaded": False},
-            {"id": 6, "cam": 3, "rect": pygame.Rect(228, 300, 18, 18), "active": False, "name": "Visor Stain", "evaded": False},
-
-            # CAM 04: Containment Gate
-            {"id": 7, "cam": 4, "rect": pygame.Rect(392, 282, 16, 26), "active": False, "name": "Lock Gap", "evaded": False},
-
-            # CAM 05: Cryo Vault
-            {"id": 8, "cam": 5, "rect": pygame.Rect(202, 182, 35, 10), "active": False, "name": "Frost Speck", "evaded": False},
-            {"id": 9, "cam": 5, "rect": pygame.Rect(362, 270, 18, 25), "active": False, "name": "Glass Warp", "evaded": False},
-
-            # CAM 06: Quantum Lab
-            {"id": 10, "cam": 6, "rect": pygame.Rect(392, 262, 16, 16), "active": False, "name": "Core Flicker", "evaded": False},
-
-            # CAM 07: Substation
-            {"id": 11, "cam": 7, "rect": pygame.Rect(362, 222, 16, 16), "active": False, "name": "Gauge Needle Jitter", "evaded": False},
-            {"id": 12, "cam": 7, "rect": pygame.Rect(440, 290, 22, 15), "active": False, "name": "Wire Split", "evaded": False},
-
-            # CAM 08: Deep Window
-            {"id": 13, "cam": 8, "rect": pygame.Rect(310, 190, 14, 14), "active": False, "name": "Void Pulse", "evaded": False}
-        ]
-
-    def show_story(self):
-        self.state = "STORY"
-
-    def start_game(self):
-        self.state = "PLAYING"
-        self.current_cam = 1
-        self.caught_count = 0
-        self.sanity = INITIAL_SANITY
-        self.is_locked = False
+        self.locked_until = 0
+        self.next_spawn = now + FIRST_SPAWN_DELAY_MS
+        self.act = 0
+        self.result = None
+        self.reason = None
+        self.logged = 0
+        self.false_alarms = 0
+        self.spawned = 0
+        self.seen = set()
+        self.found = set()
+        self.end_elapsed = None
         for a in self.anomalies:
-            a["active"] = False
-            a["evaded"] = False
+            a["active"] = a["hover"] = a["evaded"] = False
 
-    def switch_cam(self, direction, assets):
-        if self.state != "PLAYING" or self.is_locked:
-            return
-        new_cam = self.current_cam + direction
-        if new_cam < 1:
-            new_cam = self.max_cams
-        elif new_cam > self.max_cams:
-            new_cam = 1
 
-        if self.current_cam != new_cam:
-            self.current_cam = new_cam
-            assets.sound_click.play()
+    def elapsed(self, now):
+        if self.end_elapsed is not None:
+            return self.end_elapsed
+        return (now - self.start) / 1000
 
-    def check_hover_evade(self, mouse_pos, assets):
-        """Перевірка наведення миші для механіки ухилення аномалії."""
-        if self.state != "PLAYING" or self.is_locked:
-            return
+    def is_locked(self, now):
+        return now < self.locked_until
 
+    @property
+    def active_count(self):
+        return sum(1 for a in self.anomalies if a["active"])
+
+    def breach_count(self, now):
+        return sum(1 for a in self.anomalies if a["active"] and now - a["since"] >= BREACH_GRACE_MS)
+
+    def state_for(self, cam):
+        state = dict(self.rooms[cam].base_state)
         for a in self.anomalies:
-            if a["cam"] == self.current_cam and a["active"] and not a["evaded"]:
-                if a["rect"].collidepoint(mouse_pos):
-                    if random.random() < EVADE_CHANCE:
-                        # Аномалія помітила погляд і телепортується на іншу камеру!
-                        a["evaded"] = True
-                        other_cams = [c for c in range(1, self.max_cams + 1) if c != self.current_cam]
-                        a["cam"] = random.choice(other_cams)
-                        assets.sound_error.play()
+            if a["active"] and a["cam"] == cam:
+                state.update(a["changes"])
+        return state
 
-    def spawn_random_anomaly(self):
-        if self.state != "PLAYING" or self.is_locked:
-            return
+    def stats(self):
+        s = {
+            "survived": fmt_clock(self.end_elapsed or 0),
+            "logged": self.logged,
+            "unique": len(self.found),
+            "total": self.total,
+            "false_alarms": self.false_alarms,
+            "missed": self.active_count,
+            "spawned": self.spawned,
+            "found": set(self.found),
+        }
+        s["grade"], s["label"] = rating(s, self.result == "WIN")
+        return s
 
-        hidden = [a for a in self.anomalies if a["cam"] != self.current_cam and not a["active"]]
-        if hidden:
-            chosen = random.choice(hidden)
-            chosen["active"] = True
-            chosen["evaded"] = False
-
-    def handle_click(self, pos, assets):
-        if self.state != "PLAYING" or self.is_locked:
-            return
-
-        hit = False
+    def shift_time(self, ms):
+        self.start += ms
+        self.next_spawn += ms
+        if self.locked_until:
+            self.locked_until += ms
         for a in self.anomalies:
-            if a["cam"] == self.current_cam and a["active"] and a["rect"].collidepoint(pos):
+            if a["active"]:
+                a["since"] += ms
+
+
+    def _finish(self, result, reason, now):
+        self.result, self.reason = result, reason
+        self.end_elapsed = (now - self.start) / 1000
+
+    def update(self, now, observed_cam):
+        events = []
+        if self.result:
+            return events
+        el = self.elapsed(now)
+
+        act = act_at(el)
+        if act != self.act:
+            self.act = act
+            events.append("act")
+
+        if el >= SHIFT_DURATION_S:
+            self._finish("WIN", None, now)
+            events.append("win")
+            return events
+
+        if now >= self.next_spawn:
+            if self._activate(observed_cam, now):
+                self.spawned += 1
+                events.append("spawn")
+            lo, hi = ACTS[self.act]["spawn"]
+            self.next_spawn = now + int(random.uniform(lo, hi) * 1000)
+
+        if self.breach_count(now) >= MAX_ACTIVE_ANOMALIES:
+            self._finish("LOSE", "BREACH", now)
+            events.append("lose")
+        return events
+
+    def _activate(self, exclude_cam, now, evaded=False, since=None):
+        busy = {a["cam"] for a in self.anomalies if a["active"]}
+        max_tier = ACTS[self.act]["tier"]
+        pool = [a for a in self.anomalies
+                if not a["active"] and a["cam"] not in busy and a["cam"] != exclude_cam and a["tier"] <= max_tier]
+        if not pool:
+            return None
+        unseen = [a for a in pool if a["uid"] not in self.seen]
+        if unseen:
+            top = max(a["tier"] for a in unseen)
+            fresh = [a for a in unseen if a["tier"] == top]
+            pool = fresh if random.random() < 0.7 else unseen
+        chosen = random.choice(pool)
+        chosen["active"] = True
+        chosen["hover"] = False
+        chosen["evaded"] = evaded
+        chosen["since"] = now if since is None else since
+        self.seen.add(chosen["uid"])
+        return chosen
+
+    def hover(self, cam, pos, now):
+        for a in self.anomalies:
+            if a["cam"] != cam or not a["active"]:
+                continue
+            inside = a["rect"].collidepoint(pos)
+            if inside and not a["hover"]:
+                a["hover"] = True
+                if not a["evaded"] and random.random() < EVADE_CHANCE:
+                    if self._activate(cam, now, evaded=True, since=a["since"]):
+                        a["active"] = False
+                        return "evade"
+            elif not inside:
+                a["hover"] = False
+        return None
+
+    def report(self, cam, pos, now):
+        if self.result or self.is_locked(now):
+            return None, None
+        for a in self.anomalies:
+            if a["cam"] == cam and a["active"] and a["rect"].collidepoint(pos):
                 a["active"] = False
-                self.caught_count += 1
-                hit = True
-                assets.sound_catch.play()
-                break
+                self.logged += 1
+                self.found.add(a["uid"])
+                return "hit", a
 
-        if not hit:
-            # Хибний клік: штраф глузду + блокування на 3 секунди
-            self.sanity -= SANITY_PENALTY
-            self.is_locked = True
-            self.lock_start_time = pygame.time.get_ticks()
-            assets.sound_error.play()
-
-    def update_status(self):
-        if self.state != "PLAYING":
-            return
-
-        # Зняття блокування після 3 секунд
-        if self.is_locked:
-            if pygame.time.get_ticks() - self.lock_start_time >= LOCKOUT_DURATION_MS:
-                self.is_locked = False
-
-        active_count = sum(1 for a in self.anomalies if a["active"])
-        if active_count >= MAX_ACTIVE_ANOMALIES or self.sanity <= 0:
-            self.state = "GAMEOVER"
-        elif self.caught_count >= REQUIRED_WIN_CATCHES:
-            self.state = "WIN"
+        self.false_alarms += 1
+        self.sanity = max(0, self.sanity - SANITY_PENALTY)
+        self.locked_until = now + LOCKOUT_DURATION_MS
+        if self.sanity <= 0:
+            self._finish("LOSE", "SANITY", now)
+        return "miss", None

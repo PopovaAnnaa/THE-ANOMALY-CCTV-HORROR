@@ -34,6 +34,7 @@ class MenuScene(Scene):
         pygame.display.set_caption(WINDOW_TITLE)
         app.assets.stop_hum()
         app.assets.stop_static_loop()
+        app.assets.stop_typewriter()
         self.cams = list(ROOMS)
         random.shuffle(self.cams)
         self.cam_index = 0
@@ -118,7 +119,6 @@ class TypewriterScene(Scene):
         super().__init__(app)
         self.total = sum(len(t) for t, _ in self.lines)
         self.skip = False
-        self.last_tick = 0
 
     @property
     def shown(self):
@@ -129,10 +129,10 @@ class TypewriterScene(Scene):
         return self.shown >= self.total
 
     def update(self):
-        n = self.shown
-        if not self.done and n // 3 != self.last_tick:
-            self.last_tick = n // 3
-            self.app.assets.sound_tick.play()
+        if not self.done and self.shown > 0:
+            self.app.assets.play_typewriter()
+        else:
+            self.app.assets.stop_typewriter()
 
     def draw_text(self, screen):
         a = self.app.assets
@@ -214,15 +214,16 @@ class Intercom:
             total = sum(len(l) for l in lines)
             done_at = now + total / self.CPS * 1000
             self.msg = {"sender": sender, "stamp": stamp or fmt_clock(elapsed), "lines": lines,
-                        "corrupt": corrupt, "start": now, "total": total, "last_tick": -1,
+                        "corrupt": corrupt, "start": now, "total": total,
                         "end": done_at + self.HOLD_MS}
             self.app.assets.sound_message.play()
         if self.msg:
-            shown = self.shown(now)
-            if shown < self.msg["total"] and shown // 3 != self.msg["last_tick"]:
-                self.msg["last_tick"] = shown // 3
-                self.app.assets.sound_tick.play()
+            if self.shown(now) < self.msg["total"]:
+                self.app.assets.play_typewriter()
+            else:
+                self.app.assets.stop_typewriter()
             if now >= self.msg["end"]:
+                self.app.assets.stop_typewriter()
                 self.msg = None
 
     def shown(self, now):
@@ -296,6 +297,7 @@ class ShiftScene(Scene):
             pygame.mixer.unpause()
         self.app.assets.stop_static_loop()
         self.app.assets.stop_hum()
+        self.app.assets.stop_typewriter()
 
 
     def pause(self):

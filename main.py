@@ -8,11 +8,11 @@ from scenes import MenuScene
 
 class App:
     def __init__(self):
-        pygame.mixer.pre_init(22050, -16, 1, 512)
+        pygame.mixer.pre_init(44100, -16, 2, 512)
         pygame.init()
         if pygame.mixer.get_init() is None:
             try:
-                pygame.mixer.init(22050, -16, 1, 512)
+                pygame.mixer.init(44100, -16, 2, 512)
             except pygame.error:
                 pass
 

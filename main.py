@@ -16,7 +16,11 @@ class App:
             except pygame.error:
                 pass
 
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.fullscreen = True
+        self.screen = pygame.display.set_mode(
+            (SCREEN_WIDTH, SCREEN_HEIGHT),
+            pygame.SCALED | (pygame.FULLSCREEN if self.fullscreen else 0),
+        )
         pygame.display.set_caption("The Anomaly: CCTV Horror")
         pygame.mouse.set_visible(False)
         self.clock = pygame.time.Clock()
@@ -38,6 +42,9 @@ class App:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
+                    self.fullscreen = not self.fullscreen
+                    pygame.display.toggle_fullscreen()
                 else:
                     self.scene.handle_event(event)
 
